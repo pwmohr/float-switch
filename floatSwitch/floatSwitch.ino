@@ -20,10 +20,10 @@ void processWebRequests();
  void setup() {
 
   Serial.begin(9600);
-  // while (!Serial) {
-  //   ; // wait for serial port to connect 
-  // }
-  delay(1000);
+  while (!Serial) {
+    ; // wait for serial port to connect 
+  }
+  // delay(1000);
   Serial.println("PLEASE WORK");
 
   // initialize pins as inputs
@@ -32,8 +32,8 @@ void processWebRequests();
   pinMode(BOTTOM_SWITCH, INPUT_PULLUP);
 
   // initialize output data structure
-  data["topSwitch"] = "UNKNOWN";
-  data["bottomSwitch"] = "UNKNOWN";
+  data["topFloat"] = "UNKNOWN";
+  data["bottomFloat"] = "UNKNOWN";
   data["status"] = "UNKOWN";
 
   // set up webserver 
@@ -53,24 +53,24 @@ void loop() {
   // update data structure 
   // top switch check 
   if (digitalRead(TOP_SWITCH) == HIGH) {
-    data["topSwitch"] = "Top float down";
+    data["topFloat"] = "down";
     topSwitchValue = 1;
   } else {
-    data["topSwitch"] = "Top float up";
+    data["topFloat"] = "up";
     topSwitchValue = 0;
   }
 
   // bottom switch check 
   if (digitalRead(BOTTOM_SWITCH) == HIGH) {
-     data["bottomSwitch"] = "Bottom float down";
+     data["bottomFloat"] = "down";
      bottomSwitchValue = 1;
   } else {
-    data["bottomSwitch"] = "Bottom float up";
+    data["bottomFloat"] = "up";
     bottomSwitchValue = 0;
   }
 
   // check for valid state 
-  if ((data["bottomSwitch"] == "Bottom float down") && (data["topSwitch"] == "Top float up")){
+  if ((data["bottomFloat"] == "down") && (data["topFloat"] == "up")){
     data["status"] = "invalid";
     validState = 0;
   } else {
@@ -107,7 +107,6 @@ void loop() {
 }
 
 void setupWebServer()
-
 {
 
   Serial.println("setting up web server");
