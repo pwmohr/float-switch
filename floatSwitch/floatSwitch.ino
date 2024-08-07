@@ -2,6 +2,9 @@
 #include "WiFiS3.h"
 #include <ArduinoJson.h>
 #include "arduino_secrets.h" 
+#include "Arduino_LED_Matrix.h"
+
+ArduinoLEDMatrix matrix;
 
 #define ENABLE_WEB_SERVER
 //#define DEBUG
@@ -11,14 +14,21 @@ WiFiServer webServer(80);
 StaticJsonDocument<64> data;    // the object that stores JSON data
 const int TOP_SWITCH = 0,
           BOTTOM_SWITCH = 1;
+int num_wifi_connections = 0;
+
+#define MAX_Y 8
+#define MAX_X 12
 
 // Function Prototypes
 void setupWebServer();
 void printWifiStatus();
 void processWebRequests();
+void updateDisplay(bool, bool, long);
  
  void setup() {
 
+  matrix.begin();
+  // matrix.renderBitmap(grid, 8, 12);
   Serial.begin(9600);
   while (!Serial) {
     ; // wait for serial port to connect 
@@ -35,6 +45,7 @@ void processWebRequests();
   data["topFloat"] = "UNKNOWN";
   data["bottomFloat"] = "UNKNOWN";
   data["status"] = "UNKOWN";
+  data["wifi"] = num_wifi_connections;
 
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
@@ -77,6 +88,9 @@ void loop() {
     data["status"] = "valid";
     validState = 1; 
   }
+  data["wifi"] = num_wifi_connections;
+  
+  updateDisplay(topSwitchValue, bottomSwitchValue, WiFi.RSSI());
 
   #ifdef DEBUG
     Serial.print(topSwitchValue);
@@ -103,7 +117,6 @@ void loop() {
     // delay(20);
     // digitalWrite(LED_BUILTIN, LOW);
     // delay(980);
-
 }
 
 void setupWebServer()
@@ -145,6 +158,7 @@ void setupWebServer()
   }
   webServer.begin();                           // start the web server on port 80
   printWifiStatus();                        // you're connected now, so print out the status
+  num_wifi_connections++;
 }
 
 void processWebRequests()
@@ -217,4 +231,146 @@ void printWifiStatus() {
   Serial.print(rssi);
   Serial.println(" dBm");
 
+}
+
+void updateDisplay(bool topSwitch, bool bottomSwitch, long wifiSignalStrength) {
+  uint8_t grid[MAX_Y][MAX_X];
+  int topGridIdx;
+  int bottomGridIdx;
+  int wifiGridIdx;
+
+  const uint8_t gridPatterns[][MAX_Y][MAX_X] = {
+    { // top float up
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
+      {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // top float down
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
+      {0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // bottom float up
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0}, 
+    },
+    { // bottom float down
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1}, 
+      {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1}, 
+    },
+    { // wifi connected 0
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // wifi connected 1
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // wifi connected 2
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // wifi connected 3
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+    { // wifi connected 4
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    },
+
+  };
+
+  // Determine which float switch grids to use
+  if( topSwitch ) {
+    topGridIdx = 1;
+  }
+  else {
+    topGridIdx = 0;
+  }
+  if( bottomSwitch ) {
+    bottomGridIdx = 3;
+  }
+  else {
+    bottomGridIdx = 2;
+  }
+
+  // Determine which wifi grids to use
+  if( WiFi.status() != WL_CONNECTED ) {
+    wifiGridIdx = 4;
+  }
+  else {
+    if( wifiSignalStrength < -85 ) {
+      wifiGridIdx = 5;
+    }
+    else if( wifiSignalStrength < -75 ) {
+      wifiGridIdx = 6;
+    }
+    else if( wifiSignalStrength < -65 ) {
+      wifiGridIdx = 7;
+    }
+    else {
+      wifiGridIdx = 8;
+    }
+  }
+
+  for( int i = 0; i < MAX_X; i++ ) {
+    for( int j = 0; j < MAX_Y; j++ ) {
+      grid[j][i] = gridPatterns[topGridIdx][j][i] + gridPatterns[bottomGridIdx][j][i] + gridPatterns[wifiGridIdx][j][i];
+    }
+  }
+
+  matrix.renderBitmap(grid, 8, 12);
 }
