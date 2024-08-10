@@ -1,6 +1,6 @@
-
 #include "WiFiS3.h"
 #include <ArduinoJson.h>
+#include <climits>
 #include "arduino_secrets.h" 
 #include "Arduino_LED_Matrix.h"
 
@@ -14,7 +14,21 @@ WiFiServer webServer(80);
 StaticJsonDocument<64> data;    // the object that stores JSON data
 const int TOP_SWITCH = 0,
           BOTTOM_SWITCH = 1;
+
 int num_wifi_connections = 0;
+const unsigned long int PUMP_RUN_TIME_MS = (5*60000);   // 5 min
+
+struct {
+  bool running = false;
+  long unsigned int startTime = 0;
+  long unsigned int interval = 0;
+} pumpState;
+
+enum Status {OK, Error};
+enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
+
+Status status = OK;
+FloatState floatState = Unknown;
 
 #define MAX_Y 8
 #define MAX_X 12
@@ -23,7 +37,10 @@ int num_wifi_connections = 0;
 void setupWebServer();
 void printWifiStatus();
 void processWebRequests();
-void updateDisplay(bool, bool, long);
+void updateDisplay();
+void controlPump();
+void turnPumpOn();
+void turnPumpOff();
  
  void setup() {
 
@@ -44,9 +61,9 @@ void updateDisplay(bool, bool, long);
   // initialize output data structure
   data["topFloat"] = "UNKNOWN";
   data["bottomFloat"] = "UNKNOWN";
-  data["status"] = "UNKOWN";
   data["wifi"] = num_wifi_connections;
-
+  data["status"] = "OK";
+  
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
     setupWebServer();
@@ -56,49 +73,49 @@ void updateDisplay(bool, bool, long);
 void loop() {
   
   // values for printing to the monitor
-  bool topSwitchValue;
-  bool bottomSwitchValue;
-  bool validState;
+  unsigned int switchStatus;
 
-  // read both switches
-  // update data structure 
-  // top switch check 
-  if (digitalRead(TOP_SWITCH) == HIGH) {
-    data["topFloat"] = "down";
-    topSwitchValue = 1;
-  } else {
-    data["topFloat"] = "up";
-    topSwitchValue = 0;
-  }
+  // read both switches and update the floatState
+  switchStatus = digitalRead(TOP_SWITCH)<<1 | digitalRead(BOTTOM_SWITCH);
 
-  // bottom switch check 
-  if (digitalRead(BOTTOM_SWITCH) == HIGH) {
-     data["bottomFloat"] = "down";
-     bottomSwitchValue = 1;
-  } else {
-    data["bottomFloat"] = "up";
-    bottomSwitchValue = 0;
-  }
+  switch( switchStatus ) {
+    case 0:
+      floatState = BothUp;
+      data["topFloat"] = "Up";
+      data["bottomFloat"] = "Up";
+      break;
 
-  // check for valid state 
-  if ((data["bottomFloat"] == "down") && (data["topFloat"] == "up")){
-    data["status"] = "invalid";
-    validState = 0;
-  } else {
-    data["status"] = "valid";
-    validState = 1; 
+    case 1:
+      floatState = Invalid;
+      data["topFloat"] = "Invalid";
+      data["bottomFloat"] = "Invalid";
+      break;
+
+    case 2:
+      floatState = TopDown;
+      data["topFloat"] = "Down";
+      data["bottomFloat"] = "Up";
+      break;
+
+    case 3:
+      floatState = BothDown;
+      data["topFloat"] = "Down";
+      data["bottomFloat"] = "Down";
+      break;
+
+    default:
+      floatState = Unknown;
+      data["topFloat"] = "Unknown";
+      data["bottomFloat"] = "Unknown";
+      break;
   }
   data["wifi"] = num_wifi_connections;
-  
-  updateDisplay(topSwitchValue, bottomSwitchValue, WiFi.RSSI());
+
+  updateDisplay();
+  controlPump();
 
   #ifdef DEBUG
-    Serial.print(topSwitchValue);
-    Serial.print(" ");
-    Serial.print(bottomSwitchValue);
-    Serial.print(" ");
-    Serial.println(validState);
-    Serial.println();
+    Serial.println(switchStatus);
     delay(1000);
   #endif
 
@@ -111,12 +128,68 @@ void loop() {
   // process web requests 
   processWebRequests();
   #endif
+}
 
-  // LED flash for testing
-    // digitalWrite(LED_BUILTIN, HIGH);
-    // delay(20);
-    // digitalWrite(LED_BUILTIN, LOW);
-    // delay(980);
+void controlPump()
+{
+  unsigned long int currentTime;
+
+  // if sensor is outputting an invalid state or we are in an active error state, make sure the pump is off
+  if( (floatState == Invalid || status == Error) && pumpState.running == true ) {
+    turnPumpOff();
+    status = Error;
+  }
+
+  // if sensor is saying that the level is dangerously low, make sure the pump is off and set the error flag
+  if( floatState == BothDown && pumpState.running == true ) {
+    turnPumpOff();
+    status = Error;
+  }
+
+  // calculate how long the pump has been running
+  // if the clock has rolled over, the calculation is different, handled in the else branch
+  currentTime = millis();
+  if( pumpState.startTime < currentTime ) {
+    pumpState.interval = currentTime - pumpState.startTime;
+  }
+  else {  
+    pumpState.interval = ULONG_MAX - pumpState.startTime + currentTime;
+  }
+
+  // if the pump has been running more than PUMP_RUN_TIME_MS milliseconds, turn it off and set the error flag
+  if( pumpState.running == true && pumpState.interval > PUMP_RUN_TIME_MS ) {
+    turnPumpOff();
+    status = Error;
+  }
+
+  // if sensor is saying that the level is high, shut the pump off
+  if( pumpState.running == true && floatState == BothUp ) {
+    turnPumpOff();
+  }
+
+  // if sensor is saying that the level is low and the pump isn't running, start it
+  if( pumpState.running == false && floatState == TopDown ) {
+    turnPumpOn();
+  }
+}
+
+void turnPumpOn()
+{
+  #ifdef DEBUG
+  Serial.println("Pump turning on.");
+  #endif
+  // code to turn pump on goes here
+  pumpState.running = true;
+  pumpState.startTime = millis();
+}
+
+void turnPumpOff()
+{
+  #ifdef DEBUG
+  Serial.println("Pump turning off.");
+  #endif
+  // code to turn pump off goes here
+  pumpState.running = false;
 }
 
 void setupWebServer()
@@ -233,7 +306,7 @@ void printWifiStatus() {
 
 }
 
-void updateDisplay(bool topSwitch, bool bottomSwitch, long wifiSignalStrength) {
+void updateDisplay() {
   uint8_t grid[MAX_Y][MAX_X];
   int topGridIdx;
   int bottomGridIdx;
@@ -334,18 +407,41 @@ void updateDisplay(bool topSwitch, bool bottomSwitch, long wifiSignalStrength) {
   };
 
   // Determine which float switch grids to use
-  if( topSwitch ) {
-    topGridIdx = 1;
+
+  // enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
+  switch( floatState ) {
+    case BothUp:
+      topGridIdx = 0;
+      bottomGridIdx = 2;
+      break;
+
+    case TopDown:
+      topGridIdx = 1;
+      bottomGridIdx = 2;
+      break;
+
+    case BothDown:
+      topGridIdx = 1;
+      bottomGridIdx = 3;
+      break;
+
+    case Invalid:
+      topGridIdx = 0;
+      bottomGridIdx = 3;
+      break;
+    
+    case Unknown:
+      topGridIdx = 0;
+      bottomGridIdx = 3;
+      break;
+
+    default:
+      topGridIdx = 1;
+      bottomGridIdx = 2;
+      break;
   }
-  else {
-    topGridIdx = 0;
-  }
-  if( bottomSwitch ) {
-    bottomGridIdx = 3;
-  }
-  else {
-    bottomGridIdx = 2;
-  }
+
+  int wifiSignalStrength = WiFi.RSSI();
 
   // Determine which wifi grids to use
   if( WiFi.status() != WL_CONNECTED ) {
