@@ -7,13 +7,13 @@
 ArduinoLEDMatrix matrix;
 
 #define ENABLE_WEB_SERVER
-//#define DEBUG
+// #define DEBUG
 
 /// Global Variables
 WiFiServer webServer(80);
 StaticJsonDocument<64> data;    // the object that stores JSON data
-const int TOP_SWITCH = 0,
-          BOTTOM_SWITCH = 1;
+const int TOP_SWITCH = PIN_D0,
+          BOTTOM_SWITCH = PIN_D1;
 
 int num_wifi_connections = 0;
 const unsigned long int PUMP_RUN_TIME_MS = (5*60000);   // 5 min
@@ -27,7 +27,10 @@ struct {
 enum Status {OK, Error};
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
 
-Status status = OK;
+Status levelErrStatus = OK;    // if the level drops below the lower float, that causes a levelStatus Error.
+Status floatErrStatus = OK;    // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
+Status pumpRunTimeErrStatus = OK;
+
 FloatState floatState = Unknown;
 
 #define MAX_Y 8
@@ -63,7 +66,7 @@ void turnPumpOff();
   data["bottomFloat"] = "UNKNOWN";
   data["wifi"] = num_wifi_connections;
   data["status"] = "OK";
-  
+
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
     setupWebServer();
@@ -101,6 +104,7 @@ void loop() {
       floatState = BothDown;
       data["topFloat"] = "Down";
       data["bottomFloat"] = "Down";
+      levelErrStatus = Error;
       break;
 
     default:
@@ -113,11 +117,6 @@ void loop() {
 
   updateDisplay();
   controlPump();
-
-  #ifdef DEBUG
-    Serial.println(switchStatus);
-    delay(1000);
-  #endif
 
   // check for connection
   #ifdef ENABLE_WEB_SERVER
@@ -134,16 +133,20 @@ void controlPump()
 {
   unsigned long int currentTime;
 
-  // if sensor is outputting an invalid state or we are in an active error state, make sure the pump is off
-  if( (floatState == Invalid || status == Error) && pumpState.running == true ) {
+  // make invalid float state a latched error
+  if( floatState == Invalid ) {
+    floatErrStatus = Error;
+  }
+
+  // any errors stop the pump
+  if( (floatErrStatus == Error || levelErrStatus == Error || pumpRunTimeErrStatus == Error) && pumpState.running == true ) {
     turnPumpOff();
-    status = Error;
   }
 
   // if sensor is saying that the level is dangerously low, make sure the pump is off and set the error flag
   if( floatState == BothDown && pumpState.running == true ) {
     turnPumpOff();
-    status = Error;
+    levelErrStatus = Error;
   }
 
   // calculate how long the pump has been running
@@ -159,7 +162,7 @@ void controlPump()
   // if the pump has been running more than PUMP_RUN_TIME_MS milliseconds, turn it off and set the error flag
   if( pumpState.running == true && pumpState.interval > PUMP_RUN_TIME_MS ) {
     turnPumpOff();
-    status = Error;
+    pumpRunTimeErrStatus = Error;
   }
 
   // if sensor is saying that the level is high, shut the pump off
@@ -403,7 +406,6 @@ void updateDisplay() {
       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
     },
-
   };
 
   // Determine which float switch grids to use
@@ -465,6 +467,15 @@ void updateDisplay() {
   for( int i = 0; i < MAX_X; i++ ) {
     for( int j = 0; j < MAX_Y; j++ ) {
       grid[j][i] = gridPatterns[topGridIdx][j][i] + gridPatterns[bottomGridIdx][j][i] + gridPatterns[wifiGridIdx][j][i];
+      if( levelErrStatus == Error ) {
+        grid[0][0] = 1;
+      }
+      if( floatErrStatus == Error ) {
+        grid[0][1] = 1;
+      }
+      if( pumpRunTimeErrStatus == Error ) {
+        grid[0][2] = 1;
+      }
     }
   }
 
