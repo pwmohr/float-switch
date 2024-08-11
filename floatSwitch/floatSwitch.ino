@@ -22,7 +22,12 @@ struct {
   bool running = false;
   long unsigned int startTime = 0;
   long unsigned int interval = 0;
+  int animationSequenceValue = 0;
+  long unsigned int animationStartTime = 0;
+  const int animationDelay = 100; // ms
+  bool animationRunning = false;
 } pumpState;
+
 
 enum Status {OK, Error};
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
@@ -170,8 +175,8 @@ void controlPump()
     turnPumpOff();
   }
 
-  // if sensor is saying that the level is low and the pump isn't running, start it
-  if( pumpState.running == false && floatState == TopDown ) {
+  // if sensor is saying that the level is low and the pump isn't running and there are no latched errors, start it
+  if( pumpState.running == false && floatState == TopDown && (floatErrStatus != Error && levelErrStatus != Error && pumpRunTimeErrStatus != Error)) {
     turnPumpOn();
   }
 }
@@ -314,99 +319,91 @@ void updateDisplay() {
   int topGridIdx;
   int bottomGridIdx;
   int wifiGridIdx;
+  typedef struct {
+    uint8_t start_x;
+    uint8_t start_y;
+    uint8_t size_x;
+    uint8_t size_y;
+  } BufferPos;
 
-  const uint8_t gridPatterns[][MAX_Y][MAX_X] = {
-    { // top float up
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
-      {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+  BufferPos topFloat;
+  topFloat.start_x = 0;
+  topFloat.start_y = 5;
+  topFloat.size_x = 6;
+  topFloat.size_y = 3;
+
+  const uint8_t topFloatPixels[][topFloat.size_y][topFloat.size_x] =
+  {
+    {
+        {1, 1, 0, 0, 0, 0}, 
+        {1, 1, 1, 1, 1, 1},
+        {1, 1, 0, 0, 0, 0},
     },
-    { // top float down
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
-      {0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0}, 
-    },
-    { // bottom float up
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0}, 
-    },
-    { // bottom float down
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1}, 
-      {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1}, 
-    },
-    { // wifi connected 0
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-    },
-    { // wifi connected 1
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-    },
-    { // wifi connected 2
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-    },
-    { // wifi connected 3
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-    },
-    { // wifi connected 4
-      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 
+    {
+        {0, 0, 1, 1, 0, 0}, 
+        {1, 1, 1, 1, 1, 1},
+        {0, 0, 1, 1, 0, 0}, 
     },
   };
+
+  BufferPos bottomFloat;
+  bottomFloat.start_x = 6;
+  bottomFloat.start_y = 5;
+  bottomFloat.size_x = 6;
+  bottomFloat.size_y = 3;
+
+  const uint8_t bottomFloatPixels[][bottomFloat.size_y][bottomFloat.size_x] = 
+  {
+    { // bottom float up
+      {0, 0, 1, 1, 0, 0}, 
+      {1, 1, 1, 1, 1, 1},
+      {0, 0, 1, 1, 0, 0}, 
+    },
+    { // bottom float down
+      {0, 0, 0, 0, 1, 1}, 
+      {1, 1, 1, 1, 1, 1},
+      {0, 0, 0, 0, 1, 1}, 
+    },
+  };
+
+  BufferPos wifi;
+  wifi.start_x = 8;
+  wifi.start_y = 0;
+  wifi.size_x = 4;
+  wifi.size_y = 4;
+  const uint8_t wifiPixels[][wifi.size_y][wifi.size_x] =
+  {
+    {
+      {1, 1, 1, 1},
+      {0, 1, 1, 1},
+      {0, 0, 1, 1},
+      {0, 0, 0, 1},
+    },
+    {
+      {0, 0, 0, 0},
+      {0, 1, 1, 1},
+      {0, 0, 1, 1},
+      {0, 0, 0, 1},
+    },
+    {
+      {0, 0, 0, 0},
+      {0, 0, 0, 0},
+      {0, 0, 1, 1},
+      {0, 0, 0, 1},
+    },
+    {
+      {0, 0, 0, 0},
+      {0, 0, 0, 0},
+      {0, 0, 0, 0},
+      {0, 0, 0, 1},
+    },
+  };
+
+  uint8_t pumpRunningSequence[][2] = 
+  {
+    {5,3}, {5,2}, {6,2}, {6,3}
+  };
+  
 
   // Determine which float switch grids to use
 
@@ -414,32 +411,32 @@ void updateDisplay() {
   switch( floatState ) {
     case BothUp:
       topGridIdx = 0;
-      bottomGridIdx = 2;
+      bottomGridIdx = 0;
       break;
 
     case TopDown:
       topGridIdx = 1;
-      bottomGridIdx = 2;
+      bottomGridIdx = 0;
       break;
 
     case BothDown:
       topGridIdx = 1;
-      bottomGridIdx = 3;
+      bottomGridIdx = 1;
       break;
 
     case Invalid:
       topGridIdx = 0;
-      bottomGridIdx = 3;
+      bottomGridIdx = 1;
       break;
     
     case Unknown:
       topGridIdx = 0;
-      bottomGridIdx = 3;
+      bottomGridIdx = 1;
       break;
 
     default:
-      topGridIdx = 1;
-      bottomGridIdx = 2;
+      topGridIdx = 0;
+      bottomGridIdx = 1;
       break;
   }
 
@@ -447,26 +444,48 @@ void updateDisplay() {
 
   // Determine which wifi grids to use
   if( WiFi.status() != WL_CONNECTED ) {
-    wifiGridIdx = 4;
+    wifiGridIdx = -1;
   }
   else {
     if( wifiSignalStrength < -85 ) {
-      wifiGridIdx = 5;
+      wifiGridIdx = 3;
     }
     else if( wifiSignalStrength < -75 ) {
-      wifiGridIdx = 6;
+      wifiGridIdx = 2;
     }
     else if( wifiSignalStrength < -65 ) {
-      wifiGridIdx = 7;
+      wifiGridIdx = 1;
     }
     else {
-      wifiGridIdx = 8;
+      wifiGridIdx = 0;
     }
   }
 
   for( int i = 0; i < MAX_X; i++ ) {
     for( int j = 0; j < MAX_Y; j++ ) {
-      grid[j][i] = gridPatterns[topGridIdx][j][i] + gridPatterns[bottomGridIdx][j][i] + gridPatterns[wifiGridIdx][j][i];
+      // zero out the display buffer
+      grid[j][i] = 0;
+      
+  
+      // top float
+      if( ((i >= topFloat.start_x) && (i < topFloat.start_x + topFloat.size_x)) && 
+          ((j >= topFloat.start_y) && (j < topFloat.start_y + topFloat.size_y)) ) {
+        grid[j][i] = topFloatPixels[topGridIdx][j-topFloat.start_y][i-topFloat.start_x];
+      }
+
+      // bottom float
+      if( ((i >= bottomFloat.start_x) && (i < bottomFloat.start_x + bottomFloat.size_x)) && 
+          ((j >= bottomFloat.start_y) && (j < bottomFloat.start_y + bottomFloat.size_y)) ) {
+        grid[j][i] = bottomFloatPixels[bottomGridIdx][j-bottomFloat.start_y][i-bottomFloat.start_x];
+      }
+
+      // wifi strength
+      if( ((i >= wifi.start_x) && (i < wifi.start_x + wifi.size_x)) && 
+          ((j >= wifi.start_y) && (j < wifi.start_y + wifi.size_y)) && (wifiGridIdx >= 0) ) {
+        grid[j][i] = wifiPixels[wifiGridIdx][j-wifi.start_y][i-wifi.start_x];
+      }
+
+      // error states
       if( levelErrStatus == Error ) {
         grid[0][0] = 1;
       }
@@ -476,8 +495,41 @@ void updateDisplay() {
       if( pumpRunTimeErrStatus == Error ) {
         grid[0][2] = 1;
       }
+
+      // pump running indicator
+      if( pumpState.running == true ) {
+        unsigned long int currentTime = millis();
+        unsigned long int animationInterval;
+
+        if( pumpState.animationRunning == false ) {
+          pumpState.animationSequenceValue = 0;
+          pumpState.animationRunning = true;
+          pumpState.animationStartTime = currentTime;
+        }
+
+        if( currentTime >= pumpState.animationStartTime ) {
+          animationInterval = currentTime - pumpState.animationStartTime;
+        }
+        else {
+          animationInterval = ULONG_MAX - pumpState.animationStartTime + currentTime;
+        }
+
+        if( animationInterval >= pumpState.animationDelay ) {
+          pumpState.animationSequenceValue++;
+          if( pumpState.animationSequenceValue >= 4 ) {
+            pumpState.animationSequenceValue = 0;
+          }
+          pumpState.animationStartTime = currentTime;
+        }
+        int pumpRunning_X = pumpRunningSequence[pumpState.animationSequenceValue][0];
+        int pumpRunning_Y = pumpRunningSequence[pumpState.animationSequenceValue][1];
+        grid[pumpRunning_Y][pumpRunning_X] = 1;
+      }
+      else {
+        pumpState.animationRunning = false;
+      }
     }
   }
-
   matrix.renderBitmap(grid, 8, 12);
 }
+
