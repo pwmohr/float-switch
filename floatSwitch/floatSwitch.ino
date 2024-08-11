@@ -29,12 +29,12 @@ struct {
 } pumpState;
 
 
-enum Status {OK, Error};
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
 
-Status levelErrStatus = OK;    // if the level drops below the lower float, that causes a levelStatus Error.
-Status floatErrStatus = OK;    // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
-Status pumpRunTimeErrStatus = OK;
+uint8_t errorStatus = 0;
+const uint8_t levelErrStatus = (1<<0);        // if the level drops below the lower float, that causes a levelStatus Error.
+const uint8_t floatErrStatus = (1<<1);        // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
+const uint8_t pumpRunTimeErrStatus = (1<<2);  // if the pump runs too long before the top float comes back up, that causes a pumpRunTimeErrStatus.
 
 FloatState floatState = Unknown;
 
@@ -70,7 +70,7 @@ void turnPumpOff();
   data["topFloat"] = "UNKNOWN";
   data["bottomFloat"] = "UNKNOWN";
   data["wifi"] = num_wifi_connections;
-  data["status"] = "OK";
+  data["status"] = 0;
 
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
@@ -109,7 +109,7 @@ void loop() {
       floatState = BothDown;
       data["topFloat"] = "Down";
       data["bottomFloat"] = "Down";
-      levelErrStatus = Error;
+      errorStatus = (errorStatus | levelErrStatus);
       break;
 
     default:
@@ -119,6 +119,7 @@ void loop() {
       break;
   }
   data["wifi"] = num_wifi_connections;
+  data["status"] = errorStatus;
 
   updateDisplay();
   controlPump();
@@ -140,18 +141,18 @@ void controlPump()
 
   // make invalid float state a latched error
   if( floatState == Invalid ) {
-    floatErrStatus = Error;
+    errorStatus = (errorStatus | floatErrStatus);
   }
 
   // any errors stop the pump
-  if( (floatErrStatus == Error || levelErrStatus == Error || pumpRunTimeErrStatus == Error) && pumpState.running == true ) {
+  if( errorStatus != 0 && pumpState.running == true ) {
     turnPumpOff();
   }
 
   // if sensor is saying that the level is dangerously low, make sure the pump is off and set the error flag
   if( floatState == BothDown && pumpState.running == true ) {
     turnPumpOff();
-    levelErrStatus = Error;
+    errorStatus = (errorStatus | levelErrStatus);
   }
 
   // calculate how long the pump has been running
@@ -167,7 +168,7 @@ void controlPump()
   // if the pump has been running more than PUMP_RUN_TIME_MS milliseconds, turn it off and set the error flag
   if( pumpState.running == true && pumpState.interval > PUMP_RUN_TIME_MS ) {
     turnPumpOff();
-    pumpRunTimeErrStatus = Error;
+    errorStatus = (errorStatus | pumpRunTimeErrStatus);
   }
 
   // if sensor is saying that the level is high, shut the pump off
@@ -176,7 +177,7 @@ void controlPump()
   }
 
   // if sensor is saying that the level is low and the pump isn't running and there are no latched errors, start it
-  if( pumpState.running == false && floatState == TopDown && (floatErrStatus != Error && levelErrStatus != Error && pumpRunTimeErrStatus != Error)) {
+  if( pumpState.running == false && floatState == TopDown && (errorStatus == 0)) {
     turnPumpOn();
   }
 }
@@ -486,13 +487,13 @@ void updateDisplay() {
       }
 
       // error states
-      if( levelErrStatus == Error ) {
+      if( errorStatus & levelErrStatus ) {
         grid[0][0] = 1;
       }
-      if( floatErrStatus == Error ) {
+      if( errorStatus & floatErrStatus ) {
         grid[0][1] = 1;
       }
-      if( pumpRunTimeErrStatus == Error ) {
+      if( errorStatus & pumpRunTimeErrStatus ) {
         grid[0][2] = 1;
       }
 
