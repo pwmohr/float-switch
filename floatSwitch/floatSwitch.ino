@@ -67,9 +67,9 @@ void turnPumpOff();
   pinMode(BOTTOM_SWITCH, INPUT_PULLUP);
 
   // initialize output data structure
-  data["topFloat"] = "UNKNOWN";
-  data["bottomFloat"] = "UNKNOWN";
+  data["floatState"] = "UNKNOWN";
   data["wifi"] = num_wifi_connections;
+  data["pump"] = "off";
   data["status"] = 0;
 
   // set up webserver 
@@ -79,7 +79,6 @@ void turnPumpOff();
 }
 
 void loop() {
-  
   // values for printing to the monitor
   unsigned int switchStatus;
 
@@ -89,33 +88,28 @@ void loop() {
   switch( switchStatus ) {
     case 0:
       floatState = BothUp;
-      data["topFloat"] = "Up";
-      data["bottomFloat"] = "Up";
+      data["floatState"] = "BothUp";
       break;
 
     case 1:
       floatState = Invalid;
-      data["topFloat"] = "Invalid";
-      data["bottomFloat"] = "Invalid";
+      data["floatState"] = "Invalid";
       break;
 
     case 2:
       floatState = TopDown;
-      data["topFloat"] = "Down";
-      data["bottomFloat"] = "Up";
+      data["floatState"] = "TopDown";
       break;
 
     case 3:
       floatState = BothDown;
-      data["topFloat"] = "Down";
-      data["bottomFloat"] = "Down";
+      data["floatState"] = "BothDown";
       errorStatus = (errorStatus | levelErrStatus);
       break;
 
     default:
       floatState = Unknown;
-      data["topFloat"] = "Unknown";
-      data["bottomFloat"] = "Unknown";
+      data["floatState"] = "Unknown";
       break;
   }
   data["wifi"] = num_wifi_connections;
@@ -187,8 +181,9 @@ void turnPumpOn()
   #ifdef DEBUG
   Serial.println("Pump turning on.");
   #endif
-  // code to turn pump on goes here
+  // TODO: code to turn pump on goes here
   pumpState.running = true;
+  data["pump"] = "on";
   pumpState.startTime = millis();
 }
 
@@ -197,8 +192,9 @@ void turnPumpOff()
   #ifdef DEBUG
   Serial.println("Pump turning off.");
   #endif
-  // code to turn pump off goes here
+  // TODO: code to turn pump off goes here
   pumpState.running = false;
+  data["pump"] = "off";
 }
 
 void setupWebServer()
