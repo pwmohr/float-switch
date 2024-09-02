@@ -566,8 +566,8 @@ void updateDisplay() {
 float readTankDepth()
 {
   String data = "";
-  String json_raw = "";
-
+  String json = "";
+  
   // fetch depth data
   // TODO: need to have a timeout in here so we don't 
   // keep spamming the depth sensor, max request rate should
@@ -588,7 +588,7 @@ float readTankDepth()
     /* actual data reception */
     char c = client.read();
     /* print data to serial port */
-    Serial.print(c);
+    // Serial.print(c);
     data += c;
   }
 
@@ -599,23 +599,22 @@ float readTankDepth()
   }
   else {
     for( int i = idx + 9; i < data.length(); i++ ) {
-      // must add an escape (\) before any quote (") characters
-      if( data[i] == '"') {
-        json_raw += '\\';
-      }
-      json_raw += data[i];
+      json += data[i];
     }
   }
+  json.trim();
+  #ifdef DEBUG
   Serial.print("Raw JSON: ");
-  json_raw.trim();
-  Serial.println(json_raw);
+  Serial.println(json);
+  #endif
 
   // Create the JSON document for de-serialization
   JsonDocument doc;
-
-  char json_raw_chars[100];
-  json_raw.toCharArray(json_raw_chars, json_raw.length());
-  deserializeJson(doc, json_raw_chars);
+  DeserializationError error = deserializeJson(doc, json);
+  if( error ) {
+    Serial.print("deserializeJson() returned ");
+    Serial.println(error.c_str());
+  }
   double depth = doc["tankDepth"];
   const char *units = doc["units"];
 
@@ -623,7 +622,7 @@ float readTankDepth()
   Serial.print(depth);
   Serial.print(" ");
   Serial.println(units);
-  return 0.15;
+  return depth;
 }
 
 
