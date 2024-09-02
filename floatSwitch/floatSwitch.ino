@@ -7,15 +7,23 @@
 ArduinoLEDMatrix matrix;
 
 #define ENABLE_WEB_SERVER
-// #define DEBUG
+#define DEBUG
+
 
 /// Global Variables
+WiFiClient client;
 WiFiServer webServer(80);
+// char server[] = "192.168.0.94";
+IPAddress server(192,168,0,194);
+unsigned long lastConnectionTime = 0;            // last time you connected to the server, in milliseconds
+const unsigned long postingInterval = 10L * 1000L; // delay between updates, in milliseconds
+
 StaticJsonDocument<64> data;    // the object that stores JSON data
 const int TOP_SWITCH = PIN_D0,
-          BOTTOM_SWITCH = PIN_D1;
+          BOTTOM_SWITCH = PIN_D1,
+          PUMP_CONTROL = PIN_D2;
+int numErrors = 0;
 
-int num_wifi_connections = 0;
 const unsigned long int PUMP_RUN_TIME_MS = (5*60000);   // 5 min
 
 struct {
@@ -28,6 +36,7 @@ struct {
   bool animationRunning = false;
 } pumpState;
 
+const float MIN_TANK_DEPTH_TO_RUN_PUMP = 0.20; // meters
 
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
 
@@ -35,6 +44,7 @@ uint8_t errorStatus = 0;
 const uint8_t levelErrStatus = (1<<0);        // if the level drops below the lower float, that causes a levelStatus Error.
 const uint8_t floatErrStatus = (1<<1);        // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
 const uint8_t pumpRunTimeErrStatus = (1<<2);  // if the pump runs too long before the top float comes back up, that causes a pumpRunTimeErrStatus.
+const uint8_t tankErrStatus  = (1<<3);        // if the float in the tank is not floating, this causes a tankErrStatus Error.
 
 FloatState floatState = Unknown;
 
@@ -49,6 +59,9 @@ void updateDisplay();
 void controlPump();
 void turnPumpOn();
 void turnPumpOff();
+void readRequest(String *received_data);
+int  httpRequest();
+float readTankDepth();
  
  void setup() {
 
@@ -65,16 +78,18 @@ void turnPumpOff();
   // turn on 20k pullup resistors 
   pinMode(TOP_SWITCH, INPUT_PULLUP);
   pinMode(BOTTOM_SWITCH, INPUT_PULLUP);
+  pinMode(PUMP_CONTROL, OUTPUT);
 
   // initialize output data structure
   data["floatState"] = "UNKNOWN";
-  data["wifi"] = num_wifi_connections;
   data["pump"] = "off";
   data["status"] = 0;
+  data["errors"] = 0;
 
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
     setupWebServer();
+
   #endif
 }
 
@@ -89,21 +104,34 @@ void loop() {
     case 0:
       floatState = BothUp;
       data["floatState"] = "BothUp";
+      errorStatus = 0;
       break;
 
     case 1:
       floatState = Invalid;
       data["floatState"] = "Invalid";
+      // see if this is error is a change from a 0 error status
+      if( errorStatus == 0 ) {
+        numErrors++;
+        data["errors"] = numErrors;
+      }
+      errorStatus = (errorStatus | floatErrStatus);
       break;
 
     case 2:
       floatState = TopDown;
       data["floatState"] = "TopDown";
+      errorStatus = 0;
       break;
 
     case 3:
       floatState = BothDown;
       data["floatState"] = "BothDown";
+      // see if this is error is a change from a 0 error status
+      if( errorStatus == 0 ) {
+        numErrors++;
+        data["errors"] = numErrors;
+      }
       errorStatus = (errorStatus | levelErrStatus);
       break;
 
@@ -112,8 +140,16 @@ void loop() {
       data["floatState"] = "Unknown";
       break;
   }
-  data["wifi"] = num_wifi_connections;
-  data["status"] = errorStatus;
+
+  // read the depth of the tank and set the tank
+  if( readTankDepth() < MIN_TANK_DEPTH_TO_RUN_PUMP ) {
+    if( errorStatus == 0 ) {
+      numErrors++;
+      data["errors"] = numErrors;
+    }
+    errorStatus = (errorStatus | tankErrStatus);
+    data["status"] = errorStatus;
+  }
 
   updateDisplay();
   controlPump();
@@ -122,21 +158,16 @@ void loop() {
   #ifdef ENABLE_WEB_SERVER
   if (WiFi.status() != WL_CONNECTED) {
     setupWebServer();
-  }
-  
+  }  
   // process web requests 
   processWebRequests();
+
   #endif
 }
 
 void controlPump()
 {
   unsigned long int currentTime;
-
-  // make invalid float state a latched error
-  if( floatState == Invalid ) {
-    errorStatus = (errorStatus | floatErrStatus);
-  }
 
   // any errors stop the pump
   if( errorStatus != 0 && pumpState.running == true ) {
@@ -150,7 +181,7 @@ void controlPump()
   }
 
   // calculate how long the pump has been running
-  // if the clock has rolled over, the calculation is different, handled in the else branch
+  // if the clock has rolled over, the calculation is different, handled in the 'else' branch
   currentTime = millis();
   if( pumpState.startTime < currentTime ) {
     pumpState.interval = currentTime - pumpState.startTime;
@@ -181,7 +212,7 @@ void turnPumpOn()
   #ifdef DEBUG
   Serial.println("Pump turning on.");
   #endif
-  // TODO: code to turn pump on goes here
+  digitalWrite(PUMP_CONTROL, HIGH);
   pumpState.running = true;
   data["pump"] = "on";
   pumpState.startTime = millis();
@@ -192,7 +223,7 @@ void turnPumpOff()
   #ifdef DEBUG
   Serial.println("Pump turning off.");
   #endif
-  // TODO: code to turn pump off goes here
+  digitalWrite(PUMP_CONTROL, LOW);
   pumpState.running = false;
   data["pump"] = "off";
 }
@@ -236,7 +267,6 @@ void setupWebServer()
   }
   webServer.begin();                           // start the web server on port 80
   printWifiStatus();                        // you're connected now, so print out the status
-  num_wifi_connections++;
 }
 
 void processWebRequests()
@@ -492,6 +522,9 @@ void updateDisplay() {
       if( errorStatus & pumpRunTimeErrStatus ) {
         grid[0][2] = 1;
       }
+      if( errorStatus & tankErrStatus ) {
+        grid[0][3] = 1;
+      }
 
       // pump running indicator
       if( pumpState.running == true ) {
@@ -527,6 +560,96 @@ void updateDisplay() {
       }
     }
   }
-  matrix.renderBitmap(grid, 8, 12);
+  matrix.renderBitmap(grid, 8, 12);}
+
+
+float readTankDepth()
+{
+  String data = "";
+  String json_raw = "";
+
+  // fetch depth data
+  // TODO: need to have a timeout in here so we don't 
+  // keep spamming the depth sensor, max request rate should
+  // maybe be at least like 1 min apart.
+
+
+  // if ten seconds have passed since your last connection,
+  // then connect again and send data:
+  if (millis() - lastConnectionTime > postingInterval) {
+    Serial.println("attempting httpRequest");
+    httpRequest();
+  }
+  // if there's incoming data from the net connection, 
+  // read it into a 
+  // send it out the serial port.  This is for debugging
+  // purposes only:
+  while (client.available()) {
+    /* actual data reception */
+    char c = client.read();
+    /* print data to serial port */
+    Serial.print(c);
+    data += c;
+  }
+
+  // Grab the text/html section
+  int idx = data.lastIndexOf("text/html");
+  if( idx < 0 ) {
+    return -1.0;
+  }
+  else {
+    for( int i = idx + 9; i < data.length(); i++ ) {
+      // must add an escape (\) before any quote (") characters
+      if( data[i] == '"') {
+        json_raw += '\\';
+      }
+      json_raw += data[i];
+    }
+  }
+  Serial.print("Raw JSON: ");
+  json_raw.trim();
+  Serial.println(json_raw);
+
+  // Create the JSON document for de-serialization
+  JsonDocument doc;
+
+  char json_raw_chars[100];
+  json_raw.toCharArray(json_raw_chars, json_raw.length());
+  deserializeJson(doc, json_raw_chars);
+  double depth = doc["tankDepth"];
+  const char *units = doc["units"];
+
+  Serial.print("Extracted depth: ");
+  Serial.print(depth);
+  Serial.print(" ");
+  Serial.println(units);
+  return 0.15;
 }
 
+
+int httpRequest()
+{
+/* -------------------------------------------------------------------------- */  
+  // close any connection before send a new request.
+  // This will free the socket on the NINA module
+  client.stop();
+
+  // if there's a successful connection:
+  if (client.connect(server, 80)) {
+    Serial.println("connecting...");
+    // send the HTTP GET request:
+    client.println("GET / HTTP/1.1");
+    client.println("Host: 192.168.0.194");
+    client.println("User-Agent: ArduinoWiFi/1.1");
+    client.println("Connection: close");
+    client.println();
+    // note the time that the connection was made:
+    lastConnectionTime = millis();
+    return 0;
+  } 
+  else {
+    // if you couldn't make a connection:
+    Serial.println("connection failed");
+    return -1;
+  }
+}
