@@ -15,8 +15,8 @@ WiFiClient client;
 WiFiServer webServer(80);
 // char server[] = "192.168.0.94";
 IPAddress server(192,168,0,194);
-unsigned long lastConnectionTime = 0;            // last time you connected to the server, in milliseconds
-const unsigned long postingInterval = 10L * 1000L; // delay between updates, in milliseconds
+unsigned long lastConnectionTime = 0;              // last time you connected to the server, in milliseconds
+const unsigned long postingInterval = 60L * 1000L; // delay between updates, in milliseconds
 
 StaticJsonDocument<64> data;    // the object that stores JSON data
 const int TOP_SWITCH = PIN_D0,
@@ -25,6 +25,8 @@ const int TOP_SWITCH = PIN_D0,
 int numErrors = 0;
 
 const unsigned long int PUMP_RUN_TIME_MS = (5*60000);   // 5 min
+
+float depth = -1;
 
 struct {
   bool running = false;
@@ -44,7 +46,8 @@ uint8_t errorStatus = 0;
 const uint8_t levelErrStatus = (1<<0);        // if the level drops below the lower float, that causes a levelStatus Error.
 const uint8_t floatErrStatus = (1<<1);        // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
 const uint8_t pumpRunTimeErrStatus = (1<<2);  // if the pump runs too long before the top float comes back up, that causes a pumpRunTimeErrStatus.
-const uint8_t tankErrStatus  = (1<<3);        // if the float in the tank is not floating, this causes a tankErrStatus Error.
+const uint8_t tankErrStatus = (1<<3);        // if the float in the tank is not floating, this causes a tankErrStatus Error.
+const uint8_t commErrStatus = (1<<4);         // if we can't get the tank depth, this causes a commErrStatus error
 
 FloatState floatState = Unknown;
 
@@ -104,7 +107,8 @@ void loop() {
     case 0:
       floatState = BothUp;
       data["floatState"] = "BothUp";
-      errorStatus = 0;
+      errorStatus = (errorStatus & ~floatErrStatus);
+      errorStatus = (errorStatus & ~levelErrStatus);
       break;
 
     case 1:
@@ -121,7 +125,8 @@ void loop() {
     case 2:
       floatState = TopDown;
       data["floatState"] = "TopDown";
-      errorStatus = 0;
+      errorStatus = (errorStatus & ~floatErrStatus);
+      errorStatus = (errorStatus & ~levelErrStatus);
       break;
 
     case 3:
@@ -138,10 +143,11 @@ void loop() {
     default:
       floatState = Unknown;
       data["floatState"] = "Unknown";
+      errorStatus = (errorStatus | floatErrStatus);
       break;
   }
 
-  // read the depth of the tank and set the tank
+  // read the depth of the tank and set the tank error status
   if( readTankDepth() < MIN_TANK_DEPTH_TO_RUN_PUMP ) {
     if( errorStatus == 0 ) {
       numErrors++;
@@ -149,6 +155,9 @@ void loop() {
     }
     errorStatus = (errorStatus | tankErrStatus);
     data["status"] = errorStatus;
+  }
+  else {
+    errorStatus = (errorStatus & ~tankErrStatus);
   }
 
   updateDisplay();
@@ -161,7 +170,6 @@ void loop() {
   }  
   // process web requests 
   processWebRequests();
-
   #endif
 }
 
@@ -177,7 +185,6 @@ void controlPump()
   // if sensor is saying that the level is dangerously low, make sure the pump is off and set the error flag
   if( floatState == BothDown && pumpState.running == true ) {
     turnPumpOff();
-    errorStatus = (errorStatus | levelErrStatus);
   }
 
   // calculate how long the pump has been running
@@ -525,6 +532,9 @@ void updateDisplay() {
       if( errorStatus & tankErrStatus ) {
         grid[0][3] = 1;
       }
+      if( errorStatus & commErrStatus ) {
+        grid[0][4] = 1;
+      }
 
       // pump running indicator
       if( pumpState.running == true ) {
@@ -567,28 +577,29 @@ float readTankDepth()
 {
   String data = "";
   String json = "";
-  
-  // fetch depth data
-  // TODO: need to have a timeout in here so we don't 
-  // keep spamming the depth sensor, max request rate should
-  // maybe be at least like 1 min apart.
+  unsigned long currentTime, elapsedTime;
 
+  // fetch depth data, but no more often than the postingInterval
+  currentTime = millis();
+  if( lastConnectionTime < currentTime ) {
+    elapsedTime = currentTime - lastConnectionTime;
+  }
+  else {  
+    elapsedTime = ULONG_MAX - lastConnectionTime + currentTime;
+  }
 
-  // if ten seconds have passed since your last connection,
-  // then connect again and send data:
-  if (millis() - lastConnectionTime > postingInterval) {
+  if (elapsedTime > postingInterval) {
     Serial.println("attempting httpRequest");
     httpRequest();
   }
-  // if there's incoming data from the net connection, 
-  // read it into a 
-  // send it out the serial port.  This is for debugging
-  // purposes only:
+
+  if( !client.available() ) {
+    return depth;
+  }
+
   while (client.available()) {
-    /* actual data reception */
-    char c = client.read();
-    /* print data to serial port */
-    // Serial.print(c);
+    char c = client.read();     // read each character in the response
+    Serial.print(c);
     data += c;
   }
 
@@ -615,13 +626,14 @@ float readTankDepth()
     Serial.print("deserializeJson() returned ");
     Serial.println(error.c_str());
   }
-  double depth = doc["tankDepth"];
+  depth = doc["tankDepth"];
   const char *units = doc["units"];
 
   Serial.print("Extracted depth: ");
   Serial.print(depth);
   Serial.print(" ");
   Serial.println(units);
+
   return depth;
 }
 
@@ -644,11 +656,14 @@ int httpRequest()
     client.println();
     // note the time that the connection was made:
     lastConnectionTime = millis();
+    // we made a connection, clear the comm error status bit
+    errorStatus = (errorStatus & ~commErrStatus);
     return 0;
   } 
   else {
     // if you couldn't make a connection:
     Serial.println("connection failed");
+    errorStatus = (errorStatus | commErrStatus);
     return -1;
   }
 }
