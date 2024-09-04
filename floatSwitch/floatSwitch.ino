@@ -31,6 +31,7 @@ float depth = -1;
 struct {
   bool running = false;
   long unsigned int startTime = 0;
+  long unsigned int cumulativeTime = 0;               // seconds
   long unsigned int interval = 0;
   int animationSequenceValue = 0;
   long unsigned int animationStartTime = 0;
@@ -38,7 +39,7 @@ struct {
   bool animationRunning = false;
 } pumpState;
 
-const float MIN_TANK_DEPTH_TO_RUN_PUMP = 0.20; // meters
+const float MIN_TANK_DEPTH_TO_RUN_PUMP = 0.10; // meters
 
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
 
@@ -88,6 +89,7 @@ float readTankDepth();
   data["pump"] = "off";
   data["status"] = 0;
   data["errors"] = 0;
+  data["runTime"] = 0;
 
   // set up webserver 
   #ifdef ENABLE_WEB_SERVER
@@ -227,12 +229,22 @@ void turnPumpOn()
 
 void turnPumpOff()
 {
+  unsigned long int currentTime;
   #ifdef DEBUG
   Serial.println("Pump turning off.");
   #endif
   digitalWrite(PUMP_CONTROL, LOW);
+  currentTime = millis();
+  if( currentTime > pumpState.startTime ) {
+    pumpState.cumulativeTime += ( pumpState.cumulativeTime + (currentTime - pumpState.startTime) ) / 1000L;
+  }
+  else {
+    pumpState.cumulativeTime += ( ULONG_MAX - pumpState.startTime + currentTime ) / 1000L;
+  }
+  data["runTime"] = pumpState.cumulativeTime;
   pumpState.running = false;
   data["pump"] = "off";
+  Serial.println(pumpState.cumulativeTime);
 }
 
 void setupWebServer()
