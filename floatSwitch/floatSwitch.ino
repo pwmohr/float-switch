@@ -13,7 +13,6 @@ ArduinoLEDMatrix matrix;
 /// Global Variables
 WiFiClient client;
 WiFiServer webServer(80);
-// char server[] = "192.168.0.94";
 IPAddress server(192,168,0,194);
 unsigned long lastConnectionTime = 0;              // last time you connected to the server, in milliseconds
 const unsigned long postingInterval = 60L * 1000L; // delay between updates, in milliseconds
@@ -39,16 +38,16 @@ struct {
   bool animationRunning = false;
 } pumpState;
 
-const float MIN_TANK_DEPTH_TO_RUN_PUMP = 0.10; // meters
+const float MIN_TANK_DEPTH_TO_RUN_PUMP = 0.40; // meters
 
 enum FloatState {BothUp, TopDown, BothDown, Invalid, Unknown};
 
 uint8_t errorStatus = 0;
-const uint8_t levelErrStatus = (1<<0);        // if the level drops below the lower float, that causes a levelStatus Error.
-const uint8_t floatErrStatus = (1<<1);        // if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
-const uint8_t pumpRunTimeErrStatus = (1<<2);  // if the pump runs too long before the top float comes back up, that causes a pumpRunTimeErrStatus.
-const uint8_t tankErrStatus = (1<<3);        // if the float in the tank is not floating, this causes a tankErrStatus Error.
-const uint8_t commErrStatus = (1<<4);         // if we can't get the tank depth, this causes a commErrStatus error
+const uint8_t levelErrStatus = (1<<0);        // 1 - if the level drops below the lower float, that causes a levelStatus Error.
+const uint8_t floatErrStatus = (1<<1);        // 2 - if the floats are ever in the invalid configuration (top up, but bottom down), that causes a floatStatus Error.
+const uint8_t pumpRunTimeErrStatus = (1<<2);  // 4 - if the pump runs too long before the top float comes back up, that causes a pumpRunTimeErrStatus.
+const uint8_t tankErrStatus = (1<<3);         // 8 - if the float in the tank is not floating, this causes a tankErrStatus Error.
+const uint8_t commErrStatus = (1<<4);         // 16 - if we can't get the tank depth, this causes a commErrStatus error
 
 FloatState floatState = Unknown;
 
@@ -156,11 +155,11 @@ void loop() {
       data["errors"] = numErrors;
     }
     errorStatus = (errorStatus | tankErrStatus);
-    data["status"] = errorStatus;
   }
   else {
     errorStatus = (errorStatus & ~tankErrStatus);
   }
+  data["status"] = errorStatus;
 
   updateDisplay();
   controlPump();
